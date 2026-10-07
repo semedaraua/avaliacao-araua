@@ -49,7 +49,7 @@ create table public.usuarios (
   disciplina text,
   escola uuid references public.escolas(id) on delete restrict,
   trocar_senha boolean not null default true,
-  criado_por uuid references public.usuarios(id),
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now(),
   constraint escola_obrigatoria_para_perfil_local check (
     perfil in ('admin','semed') or escola is not null
