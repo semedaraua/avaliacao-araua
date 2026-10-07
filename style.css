@@ -23,11 +23,17 @@ dialog { border:0; border-radius:10px; padding:22px; width:min(560px,94vw); box-
 dialog::backdrop { background:rgba(0,0,0,.4); }
 dialog h3 { margin-top:0; }
 label { display:block; font-size:13px; margin:10px 0 3px; color:#48506a; }
-input, select { width:100%; padding:8px; border:1px solid var(--borda); border-radius:6px; font-size:14px; }
+input, select, textarea { width:100%; padding:8px; border:1px solid var(--borda); border-radius:6px; font-size:14px; font-family:inherit; }
+textarea { resize:vertical; }
 .rodape-form { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
 .grade-gab { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:6px; max-height:50vh; overflow:auto; }
 .grade-gab label { margin:0; display:flex; align-items:center; gap:6px; }
 .grade-gab select { padding:4px; }
+.grade-gab-desc { display:flex; flex-direction:column; gap:6px; max-height:55vh; overflow:auto; padding-right:4px; }
+.gab-linha { display:grid; grid-template-columns:28px 90px 1fr; gap:8px; align-items:center; }
+.gab-linha .gab-n { font-weight:600; text-align:right; color:#48506a; }
+.gab-linha select { padding:6px; font-size:13px; }
+@media (max-width:640px) { .gab-linha { grid-template-columns:22px 70px 1fr; } }
 .opcoes label { display:flex; align-items:center; gap:8px; }
 .opcoes input { width:auto; }
 

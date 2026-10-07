@@ -25,22 +25,48 @@ function agrupar(itens, chave) {
 }
 const pct = v => Math.round(v) + '%';
 const barra = taxa => `<div class="barra-nota"><i style="width:${Math.max(0, Math.min(100, taxa))}%"></i></div>`;
-const acertou = (x, i) => !!x.p.gabarito?.[i] && x.r.respostas[i] === x.p.gabarito[i];
+const acertou = (x, i) => !!x.p.gabarito?.[i]?.resposta && x.r.respostas[i] === x.p.gabarito[i].resposta;
 const calor = taxa => `background:hsl(${Math.round(taxa * 1.2)} 65% 86%)`; // 0% vermelho -> 100% verde
 
 // Matriz: uma linha por grupo, uma coluna por questão, com o % de acertos do grupo em cada questão.
 function matrizQuestoes(titulo, rotuloCab, grupos, p, comAluno) {
   const gab = p.gabarito || [], nq = p.questoes;
   const cab = Array.from({ length: nq }, (_, i) => `<th class="n">${i + 1}</th>`).join('');
-  const cabGab = Array.from({ length: nq }, (_, i) => `<td class="n gab">${gab[i] || '·'}</td>`).join('');
+  const cabGab = Array.from({ length: nq }, (_, i) => `<td class="n gab">${gab[i]?.resposta || '·'}</td>`).join('');
   const linhas = grupos.map(([rot, itens]) => `<tr><td>${esc(rot)}</td>` + Array.from({ length: nq }, (_, i) => {
-    if (!gab[i]) return '<td class="n">–</td>';
-    if (comAluno) { const v = itens[0].r.respostas[i]; return v === gab[i] ? `<td class="n" style="${calor(100)}">✓</td>` : `<td class="n" style="${calor(0)}">${LETRAS.includes(v) ? v : '○'}</td>`; }
+    if (!gab[i]?.resposta) return '<td class="n">–</td>';
+    if (comAluno) { const v = itens[0].r.respostas[i]; return v === gab[i].resposta ? `<td class="n" style="${calor(100)}">✓</td>` : `<td class="n" style="${calor(0)}">${LETRAS.includes(v) ? v : '○'}</td>`; }
     const t = itens.filter(x => acertou(x, i)).length / itens.length * 100;
     return `<td class="n" style="${calor(t)}">${pct(t)}</td>`;
   }).join('') + '</tr>').join('');
   return `<h3>${titulo}</h3>
     <div class="tabela"><table class="matriz"><thead><tr><th>${rotuloCab}</th>${cab}</tr><tr><td class="gab">Gabarito</td>${cabGab}</tr></thead><tbody>${linhas}</tbody></table></div>`;
+}
+
+// Agrega acertos/erros por descritor (soma entre todas as questões de todas as provas do
+// conjunto de itens que apontam pro mesmo descritor), do pior para o melhor % de acerto.
+function statsPorDescritor(itens) {
+  const m = new Map();
+  itens.forEach(x => {
+    (x.p.gabarito || []).forEach((g, i) => {
+      if (!g?.resposta || !g?.descritor) return;
+      if (!m.has(g.descritor)) m.set(g.descritor, { acertos: 0, total: 0 });
+      const s = m.get(g.descritor);
+      s.total++;
+      if (x.r.respostas[i] === g.resposta) s.acertos++;
+    });
+  });
+  return [...m.entries()].map(([id, s]) => ({ d: porId('descritores', id), s: { ...s, taxa: s.total ? s.acertos / s.total * 100 : 0 } }))
+    .filter(x => x.d)
+    .sort((a, b) => a.s.taxa - b.s.taxa);
+}
+
+function tabelaDescritores(titulo, linhas) {
+  if (!linhas.length) return '';
+  return `<h3>${esc(titulo)}</h3>
+    <table><thead><tr><th>Código</th><th>Descritor</th><th class="n">Acertos</th><th class="n">% de acerto</th><th></th><th>Indicador</th></tr></thead><tbody>
+    ${linhas.map(x => `<tr><td>${esc(x.d.codigo)}</td><td>${esc(x.d.descricao)}</td><td class="n">${x.s.acertos} de ${x.s.total}</td><td class="n">${pct(x.s.taxa)}</td><td>${barra(x.s.taxa)}</td><td>${selo(x.s.taxa, statusAproveitamento(Math.round(x.s.taxa)))}</td></tr>`).join('')}
+    </tbody></table>`;
 }
 
 function relatorios() {
@@ -74,6 +100,7 @@ function relatorios() {
   const porTurma = agrupar(itens, x => x.t.id).map(([id, l]) => ({ t: porId('turmas', id), l, s: somar(l) }))
     .sort((a, b) => nomeTurma(a.t).localeCompare(nomeTurma(b.t)));
   const alunos = itens.slice().sort((a, b) => nomeTurma(a.t).localeCompare(nomeTurma(b.t)) || a.a.nome.localeCompare(b.a.nome));
+  const porDescritor = statsPorDescritor(itens);
 
   const tabela = (cab, linhas) => `<table><thead><tr>${cab}<th class="n">Alunos previstos</th><th class="n">Avaliados</th><th class="n">% participação</th><th class="n">Acertos</th><th class="n">% de acertos</th><th></th></tr></thead><tbody>${linhas}</tbody></table>`;
   const cel = (s, previstosGrupo) => `<td class="n">${previstosGrupo}</td><td class="n">${s.n}</td><td class="n">${previstosGrupo ? pct(s.n / previstosGrupo * 100) : '—'}</td><td class="n">${s.acertos} de ${s.total}</td><td class="n">${pct(s.taxa)}</td><td>${barra(s.taxa)}</td>`;
@@ -118,6 +145,7 @@ function relatorios() {
       <table><thead><tr><th>Turma</th><th>Matrícula</th><th>Aluno</th><th>Prova</th><th class="n">Acertos</th><th class="n">% de acertos</th><th></th></tr></thead><tbody>
       ${alunos.map(x => `<tr><td>${esc(nomeTurma(x.t))}</td><td>${esc(x.a.matricula)}</td><td>${esc(x.a.nome)}</td><td>${esc(x.p.titulo)}</td><td class="n">${x.acertos} de ${x.total}</td><td class="n">${pctDe(x.acertos, x.total)}</td><td>${barra(x.total ? x.acertos / x.total * 100 : 0)}</td></tr>`).join('')}
       </tbody></table>
+      ${tabelaDescritores('Desempenho por descritor de habilidade', porDescritor)}
       ${questoes}`}
     </div>`;
 }
@@ -143,7 +171,7 @@ function exportarRelatorioCSV() {
   const qs = prova ? Array.from({ length: prova.questoes }, (_, i) => 'Q' + (i + 1)) : [];
   const linhas = [['Escola', 'Turma', 'Prova', 'Matrícula', 'Aluno', 'Acertos', 'Total', '% acertos', ...qs]];
   itensRelatorio().forEach(x => linhas.push([x.e.nome, x.t.nome, x.p.titulo, x.a.matricula, x.a.nome, x.acertos, x.total, pctDe(x.acertos, x.total),
-    ...(prova ? qs.map((_, i) => (x.p.gabarito?.[i] ? (acertou(x, i) ? 1 : 0) : '')) : [])]));
+    ...(prova ? qs.map((_, i) => (x.p.gabarito?.[i]?.resposta ? (acertou(x, i) ? 1 : 0) : '')) : [])]));
   const csv = linhas.map(l => l.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));

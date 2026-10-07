@@ -147,7 +147,7 @@ async function entrar(u) {
 }
 async function sair() {
   await sb.auth.signOut();
-  db = { escolas: [], usuarios: [], turmas: [], alunos: [], provas: [], aplicacoes: [], resultados: [], solicitacoes: [] };
+  db = { escolas: [], usuarios: [], turmas: [], alunos: [], matrizes: [], descritores: [], provas: [], aplicacoes: [], resultados: [], solicitacoes: [] };
   document.getElementById('conteudo').innerHTML = '';
   telaLogin('entrar');
 }

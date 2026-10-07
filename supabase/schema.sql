@@ -13,6 +13,8 @@ drop table if exists public.solicitacoes cascade;
 drop table if exists public.resultados cascade;
 drop table if exists public.aplicacoes cascade;
 drop table if exists public.provas cascade;
+drop table if exists public.descritores cascade;
+drop table if exists public.matrizes cascade;
 drop table if exists public.alunos cascade;
 drop table if exists public.turmas cascade;
 drop table if exists public.usuarios cascade;
@@ -73,8 +75,34 @@ create table public.alunos (
   created_at timestamptz not null default now()
 );
 
+-- Matrizes de habilidades (SAESE/BNCC): uma por disciplina+série, com os
+-- descritores (D1, D2, ...) que as questões do banco de provas podem
+-- referenciar no gabarito, pra permitir relatórios de desempenho por
+-- descritor (além de só por questão).
+create table public.matrizes (
+  id uuid primary key default gen_random_uuid(),
+  disciplina text not null check (disciplina in ('Língua Portuguesa','Matemática')),
+  serie text not null check (serie in ('2º ano','3º ano','4º ano','5º ano','9º ano')),
+  nome text not null,
+  created_at timestamptz not null default now(),
+  unique (disciplina, serie)
+);
+
+create table public.descritores (
+  id uuid primary key default gen_random_uuid(),
+  matriz uuid not null references public.matrizes(id) on delete cascade,
+  codigo text not null,
+  eixo text,
+  codigo_bncc text,
+  descricao text not null,
+  created_at timestamptz not null default now(),
+  unique (matriz, codigo)
+);
+
 -- Banco de provas: catálogo reutilizável, sem vínculo de turma/escola.
 -- Só admin/semed criam e editam (inclui o gabarito).
+-- Cada posição do gabarito é {"resposta":"A","descritor":"<id ou null>"};
+-- "matriz" é opcional (provas que não seguem uma matriz do SAESE).
 create table public.provas (
   id uuid primary key default gen_random_uuid(),
   titulo text not null,
@@ -82,6 +110,7 @@ create table public.provas (
   questoes integer not null check (questoes between 1 and 100),
   tipo text not null default 'Múltipla escolha – 5 opções (A a E)',
   gabarito jsonb not null default '[]'::jsonb,
+  matriz uuid references public.matrizes(id),
   created_at timestamptz not null default now()
 );
 
@@ -175,6 +204,8 @@ alter table public.escolas enable row level security;
 alter table public.usuarios enable row level security;
 alter table public.turmas enable row level security;
 alter table public.alunos enable row level security;
+alter table public.matrizes enable row level security;
+alter table public.descritores enable row level security;
 alter table public.provas enable row level security;
 alter table public.aplicacoes enable row level security;
 alter table public.resultados enable row level security;
@@ -243,6 +274,18 @@ create policy alunos_update on public.alunos for update to authenticated
   using (eh_global() or escola_da_turma(turma) = minha_escola());
 create policy alunos_delete on public.alunos for delete to authenticated
   using (eh_global() or escola_da_turma(turma) = minha_escola());
+
+-- matrizes/descritores: todos autenticados veem (precisam pra montar gabarito
+-- e ler os relatórios); só admin/semed criam/editam/excluem, igual ao banco de provas.
+create policy matrizes_select on public.matrizes for select to authenticated using (true);
+create policy matrizes_insert on public.matrizes for insert to authenticated with check (eh_global());
+create policy matrizes_update on public.matrizes for update to authenticated using (eh_global());
+create policy matrizes_delete on public.matrizes for delete to authenticated using (eh_global());
+
+create policy descritores_select on public.descritores for select to authenticated using (true);
+create policy descritores_insert on public.descritores for insert to authenticated with check (eh_global());
+create policy descritores_update on public.descritores for update to authenticated using (eh_global());
+create policy descritores_delete on public.descritores for delete to authenticated using (eh_global());
 
 -- provas (banco): todos autenticados veem; só admin/semed criam/editam/excluem.
 create policy provas_select on public.provas for select to authenticated

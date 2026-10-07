@@ -1,14 +1,14 @@
 'use strict';
 
 /* ---------- Dados (cache local sincronizado com o Supabase a cada login/alteração) ---------- */
-let db = { escolas: [], usuarios: [], turmas: [], alunos: [], provas: [], aplicacoes: [], resultados: [], solicitacoes: [] };
+let db = { escolas: [], usuarios: [], turmas: [], alunos: [], matrizes: [], descritores: [], provas: [], aplicacoes: [], resultados: [], solicitacoes: [] };
 let sessao = null; // usuário logado (linha da tabela "usuarios")
 const porId = (col, id) => db[col].find(x => x.id === id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Carrega (ou recarrega) tudo que as políticas de RLS liberam para o usuário logado.
 async function carregarDados() {
-  const tabelas = ['escolas', 'usuarios', 'turmas', 'alunos', 'provas', 'aplicacoes', 'resultados', 'solicitacoes'];
+  const tabelas = ['escolas', 'usuarios', 'turmas', 'alunos', 'matrizes', 'descritores', 'provas', 'aplicacoes', 'resultados', 'solicitacoes'];
   const resp = await Promise.all(tabelas.map(t => sb.from(t).select('*')));
   resp.forEach((r, i) => { if (r.error) throw r.error; db[tabelas[i]] = r.data || []; });
 }
@@ -20,6 +20,14 @@ async function mensagemErroFuncao(error) {
 
 const LETRAS = ['A', 'B', 'C', 'D', 'E'];
 const PERFIS = { admin: 'Administrador', semed: 'Coordenador SEMED', diretor: 'Diretor', coordenador: 'Coordenador escolar', professor: 'Professor' };
+
+/* ---------- Indicador bom/atenção/crítico (usado no painel e nos relatórios) ---------- */
+const statusAproveitamento = v => v === null || v === undefined ? null : v >= 70 ? 'bom' : v >= 50 ? 'atencao' : 'critico';
+const ROTULO_STATUS = { bom: 'Bom', atencao: 'Atenção', critico: 'Crítico' };
+const selo = (valor, status) => !status ? '<span class="selo neutro"><i></i>Sem dados</span>'
+  : `<span class="selo ${status}"><i></i>${ROTULO_STATUS[status]}</span>`;
+// Ordena por número do código (D2 antes de D10), não alfabeticamente.
+const numDescritor = cod => parseInt(String(cod).match(/\d+/)?.[0] ?? '0', 10);
 
 /* ---------- Definição das entidades ---------- */
 const nomeTurma = t => t ? `${t.nome} (${porId('escolas', t.escola)?.nome ?? '?'})` : '';
@@ -72,6 +80,28 @@ const ENT = {
     colunas: ['matricula', 'nome', 'turma'],
     rotulo: a => a.nome,
   },
+  matrizes: {
+    titulo: 'Matrizes de habilidades', singular: 'Matriz',
+    campos: [
+      { k: 'nome', r: 'Nome da matriz', obrig: 1 },
+      { k: 'disciplina', r: 'Disciplina', opcoes: ['Língua Portuguesa', 'Matemática'], obrig: 1 },
+      { k: 'serie', r: 'Série/ano', opcoes: ['2º ano', '3º ano', '4º ano', '5º ano', '9º ano'], obrig: 1 },
+    ],
+    colunas: ['nome', 'disciplina', 'serie'],
+    rotulo: m => m.nome,
+  },
+  descritores: {
+    titulo: 'Descritores', singular: 'Descritor',
+    campos: [
+      { k: 'matriz', r: 'Matriz de habilidades', ref: 'matrizes', obrig: 1 },
+      { k: 'codigo', r: 'Código (ex.: D1)', obrig: 1 },
+      { k: 'eixo', r: 'Eixo / prática de linguagem' },
+      { k: 'codigo_bncc', r: 'Código BNCC (ex.: EF15LP03)' },
+      { k: 'descricao', r: 'Descrição da habilidade', obrig: 1, tipo: 'textarea' },
+    ],
+    colunas: ['codigo', 'matriz', 'descricao'],
+    rotulo: d => `${d.codigo} — ${d.descricao}`,
+  },
   provas: {
     titulo: 'Banco de provas', singular: 'Prova',
     campos: [
@@ -79,6 +109,7 @@ const ENT = {
       { k: 'disciplina', r: 'Disciplina' },
       { k: 'questoes', r: 'Quantidade de questões (1 a 100)', tipo: 'number', obrig: 1, min: 1, max: 100, padrao: 10 },
       { k: 'tipo', r: 'Tipo de pergunta', opcoes: ['Múltipla escolha – 5 opções (A a E)'], padrao: 'Múltipla escolha – 5 opções (A a E)' },
+      { k: 'matriz', r: 'Matriz de habilidades (opcional, pra registrar o descritor de cada questão)', ref: 'matrizes' },
     ],
     colunas: ['titulo', 'disciplina', 'questoes'],
     rotulo: p => p.titulo,
@@ -117,6 +148,9 @@ const PERM = {
   turmas:     { ver: TODOS, criar: TODOS, editar: TODOS, excluir: TODOS },
   alunos:     { ver: TODOS, criar: TODOS, editar: TODOS, excluir: TODOS },
   usuarios:   { ver: GERENTES, criar: GERENTES, editar: GERENTES, excluir: GERENTES },
+  // Matrizes/descritores: só administrador e coordenador SEMED cadastram (mesma regra do banco de provas).
+  matrizes:    { ver: ['admin', 'semed'], criar: ['admin', 'semed'], editar: ['admin', 'semed'], excluir: ['admin', 'semed'] },
+  descritores: { ver: ['admin', 'semed'], criar: ['admin', 'semed'], editar: ['admin', 'semed'], excluir: ['admin', 'semed'] },
   // Banco de provas: só administrador e coordenador SEMED criam/editam/excluem provas e gabaritos.
   provas:     { ver: TODOS, criar: ['admin', 'semed'], editar: ['admin', 'semed'], excluir: ['admin', 'semed'] },
   // Provas aplicadas: diretor e coordenador escolar selecionam uma prova do banco e vinculam à turma da sua escola.
@@ -131,12 +165,13 @@ const ACOES = {
   resultados: TODOS,
   redefinirSenha: GERENTES,
 };
-const ABAS = ['dashboard', 'escolas', 'turmas', 'alunos', 'usuarios', 'provas', 'aplicacoes', 'relatorios'];
+const ABAS = ['dashboard', 'escolas', 'turmas', 'alunos', 'usuarios', 'matrizes', 'descritores', 'provas', 'aplicacoes', 'relatorios'];
 const dependentes = {
   escolas: [['turmas', 'escola'], ['usuarios', 'escola']],
   turmas: [['alunos', 'turma'], ['aplicacoes', 'turma']],
   usuarios: [['aplicacoes', 'professor']],
   alunos: [['resultados', 'aluno']],
+  matrizes: [['descritores', 'matriz'], ['provas', 'matriz']],
   provas: [['aplicacoes', 'prova']],
   aplicacoes: [['resultados', 'aplicacao']],
 };
@@ -236,6 +271,8 @@ function editar(id) {
       const ops = (c.opcoesFn ? c.opcoesFn() : c.opcoes);
       ctl = `<select name="${c.k}" ${c.obrig ? 'required' : ''}><option value=""></option>${ops.map(o =>
         `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(c.mapa ? c.mapa[o] : o)}</option>`).join('')}</select>`;
+    } else if (c.tipo === 'textarea') {
+      ctl = `<textarea name="${c.k}" rows="3" ${c.obrig ? 'required' : ''}>${esc(v)}</textarea>`;
     } else ctl = `<input name="${c.k}" type="${c.tipo || 'text'}" value="${esc(v)}" ${c.obrig ? 'required' : ''} ${c.min ? `min="${c.min}"` : ''} ${c.max ? `max="${c.max}"` : ''}>`;
     return `<label>${esc(c.r)}${c.obrig ? ' *' : ''}</label>${ctl}`;
   }).join('') + `<div class="rodape-form"><button type="button" class="s" onclick="dlg.close()">Cancelar</button><button class="p" value="ok">Salvar</button></div>`;
@@ -327,15 +364,27 @@ async function redefinirSenha(id) {
 function editarGabarito(id) {
   const p = porId('provas', id), gab = p?.gabarito || [];
   if (!podeAcao('editarGabarito') || !visiveis('provas').includes(p)) return;
-  form.innerHTML = `<h3>Gabarito – ${esc(p.titulo)}</h3><div class="grade-gab">` +
-    Array.from({ length: p.questoes }, (_, i) =>
-      `<label>${i + 1}<select name="q${i}"><option value="">–</option>${LETRAS.map(l => `<option ${gab[i] === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`).join('') +
-    `</div><div class="rodape-form"><button type="button" class="s" onclick="dlg.close()">Cancelar</button><button class="p" value="ok">Salvar</button></div>`;
+  const descritores = p.matriz
+    ? db.descritores.filter(d => d.matriz === p.matriz).sort((a, b) => numDescritor(a.codigo) - numDescritor(b.codigo))
+    : [];
+  const linha = i => {
+    const g = gab[i] || {};
+    const selResp = `<select name="q${i}"><option value="">–</option>${LETRAS.map(l => `<option ${g.resposta === l ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    const selDesc = descritores.length
+      ? `<select name="d${i}"><option value="">— sem descritor —</option>${descritores.map(d =>
+          `<option value="${d.id}" ${g.descritor === d.id ? 'selected' : ''}>${esc(d.codigo)} — ${esc(d.descricao.length > 70 ? d.descricao.slice(0, 70) + '…' : d.descricao)}</option>`).join('')}</select>`
+      : '';
+    return `<div class="gab-linha"><span class="gab-n">${i + 1}</span>${selResp}${selDesc}</div>`;
+  };
+  form.innerHTML = `<h3>Gabarito – ${esc(p.titulo)}</h3>
+    ${p.matriz ? '' : '<p class="msg">Esta prova não está vinculada a uma matriz de habilidades — edite a prova pra registrar o descritor de cada questão (opcional).</p>'}
+    <div class="grade-gab-desc">${Array.from({ length: p.questoes }, (_, i) => linha(i)).join('')}</div>
+    <div class="rodape-form"><button type="button" class="s" onclick="dlg.close()">Cancelar</button><button class="p" value="ok">Salvar</button></div>`;
   form.onsubmit = async ev => {
     ev.preventDefault();
     if (ev.submitter?.value !== 'ok') return;
     const fd = new FormData(form);
-    const gabarito = Array.from({ length: p.questoes }, (_, i) => fd.get('q' + i) || '');
+    const gabarito = Array.from({ length: p.questoes }, (_, i) => ({ resposta: fd.get('q' + i) || '', descritor: fd.get('d' + i) || null }));
     try {
       const { error } = await sb.from('provas').update({ gabarito }).eq('id', id);
       if (error) throw error;
@@ -343,6 +392,7 @@ function editarGabarito(id) {
       dlg.close(); listar();
     } catch (e) { alert('Erro ao salvar o gabarito: ' + e.message); }
   };
+  dlg.className = 'largo';
   dlg.showModal();
 }
 
@@ -543,8 +593,8 @@ async function lerFolha(file, p, turma, ap) {
 /* ---------- Correção e resultados ---------- */
 function pontuar(p, resp) {
   const gab = p.gabarito || [];
-  const total = gab.filter(Boolean).length;
-  const acertos = gab.reduce((n, g, i) => n + (g && resp[i] === g ? 1 : 0), 0);
+  const total = gab.filter(g => g?.resposta).length;
+  const acertos = gab.reduce((n, g, i) => n + (g?.resposta && resp[i] === g.resposta ? 1 : 0), 0);
   return { total, acertos };
 }
 const pctDe = (a, t) => t ? Math.round(a / t * 100) + '%' : '—';
@@ -556,7 +606,7 @@ function corrigir(id) {
   const p = porId('provas', ap.prova), turma = porId('turmas', ap.turma);
   const alunos = db.alunos.filter(a => a.turma === ap.turma).sort((a, b) => a.nome.localeCompare(b.nome));
   if (!alunos.length) return alert('Esta turma não tem alunos cadastrados.');
-  if (!(p.gabarito || []).some(Boolean)) return alert('Preencha o gabarito da prova antes de corrigir (no Banco de provas, botão "Gabarito").');
+  if (!(p.gabarito || []).some(g => g?.resposta)) return alert('Preencha o gabarito da prova antes de corrigir (no Banco de provas, botão "Gabarito").');
   let resp = Array(p.questoes).fill('');
   const feito = a => db.resultados.some(r => r.aplicacao === id && r.aluno === a.id);
   form.innerHTML = `<h3>Corrigir – ${esc(p.titulo)} (${esc(nomeTurma(turma))})</h3>
@@ -573,7 +623,7 @@ function corrigir(id) {
   grade.innerHTML = resp.map((_, i) => `<div class="qc" data-i="${i}"><span>${i + 1}</span><select data-i="${i}"><option value="">–</option>${LETRAS.map(l => `<option>${l}</option>`).join('')}<option value="*">múltipla</option></select><i></i></div>`).join('');
   const pintar = () => {
     grade.querySelectorAll('.qc').forEach((el, i) => {
-      const g = (p.gabarito || [])[i], v = resp[i];
+      const g = (p.gabarito || [])[i]?.resposta, v = resp[i];
       el.querySelector('select').value = v;
       el.className = 'qc' + (!g ? ' sem' : v === g ? ' ok' : ' erro') + (v === '' || v === '*' ? ' duv' : '');
       el.querySelector('i').textContent = !g ? '' : v === g ? '✓' : '✗';
