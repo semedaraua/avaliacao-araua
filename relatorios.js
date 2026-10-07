@@ -56,14 +56,27 @@ function relatorios() {
   const itens = itensRelatorio(), geral = somar(itens);
   const opt = (lista, sel, rot) => lista.map(o => `<option value="${o.id}" ${o.id === sel ? 'selected' : ''}>${esc(rot(o))}</option>`).join('');
 
+  // Alunos previstos: alunos matriculados nas turmas em que a prova foi aplicada (independe de já terem sido corrigidos).
+  const aplicFiltradas = aplicVisiveis.filter(ap => (!f.turma || ap.turma === f.turma) && (!f.prova || ap.prova === f.prova));
+  const alunosPorTurma = new Map();
+  visiveis('alunos').forEach(a => alunosPorTurma.set(a.turma, (alunosPorTurma.get(a.turma) || 0) + 1));
+  const previstosPorEscola = new Map(), previstosPorTurma = new Map();
+  aplicFiltradas.forEach(ap => {
+    const n = alunosPorTurma.get(ap.turma) || 0, escolaId = porId('turmas', ap.turma)?.escola;
+    previstosPorTurma.set(ap.turma, (previstosPorTurma.get(ap.turma) || 0) + n);
+    if (escolaId) previstosPorEscola.set(escolaId, (previstosPorEscola.get(escolaId) || 0) + n);
+  });
+  const previstos = aplicFiltradas.reduce((n, ap) => n + (alunosPorTurma.get(ap.turma) || 0), 0);
+  const participacao = n => previstos ? pct(n / previstos * 100) : '—';
+
   const porEscola = agrupar(itens, x => x.e.id).map(([id, l]) => ({ e: porId('escolas', id), l, s: somar(l), turmas: new Set(l.map(x => x.t.id)).size }))
     .sort((a, b) => a.e.nome.localeCompare(b.e.nome));
   const porTurma = agrupar(itens, x => x.t.id).map(([id, l]) => ({ t: porId('turmas', id), l, s: somar(l) }))
     .sort((a, b) => nomeTurma(a.t).localeCompare(nomeTurma(b.t)));
   const alunos = itens.slice().sort((a, b) => nomeTurma(a.t).localeCompare(nomeTurma(b.t)) || a.a.nome.localeCompare(b.a.nome));
 
-  const tabela = (cab, linhas) => `<table><thead><tr>${cab}<th class="n">Alunos</th><th class="n">Acertos</th><th class="n">% de acertos</th><th></th></tr></thead><tbody>${linhas}</tbody></table>`;
-  const cel = s => `<td class="n">${s.n}</td><td class="n">${s.acertos} de ${s.total}</td><td class="n">${pct(s.taxa)}</td><td>${barra(s.taxa)}</td>`;
+  const tabela = (cab, linhas) => `<table><thead><tr>${cab}<th class="n">Alunos previstos</th><th class="n">Avaliados</th><th class="n">% participação</th><th class="n">Acertos</th><th class="n">% de acertos</th><th></th></tr></thead><tbody>${linhas}</tbody></table>`;
+  const cel = (s, previstosGrupo) => `<td class="n">${previstosGrupo}</td><td class="n">${s.n}</td><td class="n">${previstosGrupo ? pct(s.n / previstosGrupo * 100) : '—'}</td><td class="n">${s.acertos} de ${s.total}</td><td class="n">${pct(s.taxa)}</td><td>${barra(s.taxa)}</td>`;
   const filtrosDesc = [f.escola && porId('escolas', f.escola)?.nome, f.turma && nomeTurma(porId('turmas', f.turma)), f.prova && porId('provas', f.prova)?.titulo].filter(Boolean);
   const prova = f.prova ? porId('provas', f.prova) : null;
 
@@ -89,16 +102,18 @@ function relatorios() {
     </div>
     <div id="rel-corpo" class="rel">
       ${filtrosDesc.length ? `<p class="msg">Filtro: ${esc(filtrosDesc.join(' · '))}</p>` : ''}
-      ${!itens.length ? '<div class="vazio">Nenhum resultado corrigido para os filtros selecionados.</div>' : `
       <div class="cartoes">
+        <div class="cartao"><span>Alunos previstos</span><b>${previstos}</b></div>
         <div class="cartao"><span>Alunos avaliados</span><b>${geral.n}</b></div>
-        <div class="cartao"><span>Acertos</span><b>${geral.acertos} <small>de ${geral.total}</small></b></div>
-        <div class="cartao"><span>% de acertos</span><b>${pct(geral.taxa)}</b></div>
+        <div class="cartao"><span>% de participação</span><b>${participacao(geral.n)}</b></div>
+        ${itens.length ? `<div class="cartao"><span>Acertos</span><b>${geral.acertos} <small>de ${geral.total}</small></b></div>
+        <div class="cartao"><span>% de acertos</span><b>${pct(geral.taxa)}</b></div>` : ''}
       </div>
+      ${!itens.length ? '<div class="vazio">Nenhum resultado corrigido para os filtros selecionados.</div>' : `
       <h3>Acertos por escola</h3>
-      ${tabela('<th>Escola</th><th class="n">Turmas</th>', porEscola.map(x => `<tr><td>${esc(x.e.nome)}</td><td class="n">${x.turmas}</td>${cel(x.s)}</tr>`).join(''))}
+      ${tabela('<th>Escola</th><th class="n">Turmas</th>', porEscola.map(x => `<tr><td>${esc(x.e.nome)}</td><td class="n">${x.turmas}</td>${cel(x.s, previstosPorEscola.get(x.e.id) || 0)}</tr>`).join(''))}
       <h3>Acertos por turma</h3>
-      ${tabela('<th>Turma</th>', porTurma.map(x => `<tr class="clic" title="Clique para filtrar esta turma" onclick="setFiltroRel('turma','${x.t.id}')"><td>${esc(nomeTurma(x.t))}</td>${cel(x.s)}</tr>`).join(''))}
+      ${tabela('<th>Turma</th>', porTurma.map(x => `<tr class="clic" title="Clique para filtrar esta turma" onclick="setFiltroRel('turma','${x.t.id}')"><td>${esc(nomeTurma(x.t))}</td>${cel(x.s, previstosPorTurma.get(x.t.id) || 0)}</tr>`).join(''))}
       <h3>Acertos por aluno</h3>
       <table><thead><tr><th>Turma</th><th>Matrícula</th><th>Aluno</th><th>Prova</th><th class="n">Acertos</th><th class="n">% de acertos</th><th></th></tr></thead><tbody>
       ${alunos.map(x => `<tr><td>${esc(nomeTurma(x.t))}</td><td>${esc(x.a.matricula)}</td><td>${esc(x.a.nome)}</td><td>${esc(x.p.titulo)}</td><td class="n">${x.acertos} de ${x.total}</td><td class="n">${pctDe(x.acertos, x.total)}</td><td>${barra(x.total ? x.acertos / x.total * 100 : 0)}</td></tr>`).join('')}
