@@ -48,6 +48,13 @@ Deno.serve(async (req) => {
     const chamadorGlobal = ["admin", "semed"].includes(chamador.perfil);
     if (!chamadorGlobal && alvo.escola !== chamador.escola)
       return json({ error: "Sem permissão sobre este usuário." }, 403);
+    // diretor/coordenador só podem redefinir senha de professores da própria
+    // escola (mesma regra de perfisCriaveis() em app.js e perfil_criavel() no
+    // banco) — sem isso, um coordenador conseguia redefinir a senha do
+    // diretor da própria escola (ou de outro coordenador) e sequestrar a
+    // conta, já que a função devolve a senha temporária em texto puro.
+    if (!chamadorGlobal && alvo.perfil !== "professor")
+      return json({ error: "Sem permissão sobre este usuário." }, 403);
 
     const senha = senhaTemporaria();
     const { error: erroAuth } = await admin.auth.admin.updateUserById(alvo.auth_id, { password: senha });
