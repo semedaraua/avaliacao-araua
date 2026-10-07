@@ -142,7 +142,7 @@ async function entrar(u) {
   document.body.classList.remove('deslogado');
   document.getElementById('usuario').innerHTML = `<div><b>${esc(u.nome)}</b><span>${PERFIS[u.perfil]}${u.escola ? ' · ' + esc(porId('escolas', u.escola)?.nome ?? '') : ''}</span></div>
     <button onclick="alterarSenha()">Alterar senha</button><button onclick="sair()">Sair</button>`;
-  aba = abasVisiveis().includes('turmas') ? 'turmas' : abasVisiveis()[0];
+  aba = abasVisiveis().includes('dashboard') ? 'dashboard' : abasVisiveis()[0];
   menu(); listar();
 }
 async function sair() {

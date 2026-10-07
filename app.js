@@ -122,6 +122,7 @@ const PERM = {
   // Provas aplicadas: diretor e coordenador escolar selecionam uma prova do banco e vinculam à turma da sua escola.
   aplicacoes: { ver: TODOS, criar: GERENTES, editar: GERENTES, excluir: GERENTES },
   relatorios: { ver: TODOS },
+  dashboard:  { ver: TODOS },
 };
 const ACOES = {
   editarGabarito: ['admin', 'semed'],
@@ -130,7 +131,7 @@ const ACOES = {
   resultados: TODOS,
   redefinirSenha: GERENTES,
 };
-const ABAS = ['escolas', 'turmas', 'alunos', 'usuarios', 'provas', 'aplicacoes', 'relatorios'];
+const ABAS = ['dashboard', 'escolas', 'turmas', 'alunos', 'usuarios', 'provas', 'aplicacoes', 'relatorios'];
 const dependentes = {
   escolas: [['turmas', 'escola'], ['usuarios', 'escola']],
   turmas: [['alunos', 'turma'], ['aplicacoes', 'turma']],
@@ -168,9 +169,10 @@ function visiveis(col) {
 }
 
 /* ---------- Navegação ---------- */
-let aba = 'turmas';
+let aba = 'dashboard';
 const abasVisiveis = () => ABAS.filter(k => PERM[k].ver.includes(sessao.perfil));
 function tituloAba(k) {
+  if (k === 'dashboard') return 'Painel';
   if (k === 'relatorios') return 'Relatórios';
   if (k === 'escolas' && !eGlobal()) return 'Minha escola';
   if (k === 'usuarios' && !eGlobal()) return 'Professores';
@@ -192,6 +194,7 @@ function valorCelula(cfg, k, reg) {
 
 /* ---------- Listagem ---------- */
 function listar() {
+  if (aba === 'dashboard') return dashboard();
   if (aba === 'relatorios') return relatorios();
   const cfg = ENT[aba], regs = visiveis(aba);
   const cab = cfg.colunas.map(k => `<th>${esc(cfg.campos.find(c => c.k === k).r.replace(/ \(.*\)/, ''))}</th>`).join('');
