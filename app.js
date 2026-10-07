@@ -97,7 +97,7 @@ const ENT = {
     colunas: ['prova', 'turma', 'data'],
     rotulo: ap => `${porId('provas', ap.prova)?.titulo ?? '?'} — ${nomeTurma(porId('turmas', ap.turma))}`,
     extras: [
-      { r: 'Folha', f: 'abrirFolhas', p: 1 },
+      { r: 'Folha de Respostas', f: 'abrirFolhas', p: 1 },
       { r: 'Corrigir', f: 'corrigir', p: 1 },
       { r: 'Resultados', f: 'resultados' },
     ],
