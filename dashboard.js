@@ -8,15 +8,18 @@
 let dashboardEscola = '';
 let dashboardTurma = '';
 let dashboardDisciplina = '';
+let dashboardProva = '';
 
 // Números de um conjunto de turmas, opcionalmente restritos a uma disciplina
-// (via provas.disciplina): matrícula, aplicações, previstos (alunos
-// matriculados nas turmas com prova aplicada), avaliados e desempenho.
-function statsGrupo(turmas, disciplina) {
+// (via provas.disciplina) e/ou a um simulado específico (provas.id): matrícula,
+// aplicações, previstos (alunos matriculados nas turmas com prova aplicada),
+// avaliados e desempenho.
+function statsGrupo(turmas, disciplina, prova) {
   const turmaIds = new Set(turmas.map(t => t.id));
   const alunos = db.alunos.filter(a => turmaIds.has(a.turma));
   let aplicacoes = db.aplicacoes.filter(ap => turmaIds.has(ap.turma));
-  if (disciplina) aplicacoes = aplicacoes.filter(ap => porId('provas', ap.prova)?.disciplina === disciplina);
+  if (prova) aplicacoes = aplicacoes.filter(ap => ap.prova === prova);
+  else if (disciplina) aplicacoes = aplicacoes.filter(ap => porId('provas', ap.prova)?.disciplina === disciplina);
   const alunosPorTurma = new Map();
   alunos.forEach(a => alunosPorTurma.set(a.turma, (alunosPorTurma.get(a.turma) || 0) + 1));
   const previsto = aplicacoes.reduce((n, ap) => n + (alunosPorTurma.get(ap.turma) || 0), 0);
@@ -35,19 +38,21 @@ function statsGrupo(turmas, disciplina) {
   };
 }
 // Números de uma escola específica (id) ou da rede toda (id vazio/nulo).
-function statsEscola(escolaId, disciplina) {
-  return statsGrupo(escolaId ? db.turmas.filter(t => t.escola === escolaId) : visiveis('turmas'), disciplina);
+function statsEscola(escolaId, disciplina, prova) {
+  return statsGrupo(escolaId ? db.turmas.filter(t => t.escola === escolaId) : visiveis('turmas'), disciplina, prova);
 }
 
 // statusAproveitamento/ROTULO_STATUS/selo ficam em app.js (compartilhados com relatorios.js).
 const statusParticipacao = v => v === null ? null : v >= 90 ? 'bom' : v >= 70 ? 'atencao' : 'critico';
 
 // Desempenho por descritor entre as turmas do escopo atual (soma todas as provas/aplicações
-// que tocaram essas turmas, filtrando por disciplina quando informado), do pior pro melhor % de acerto.
-function statsPorDescritorTurmas(turmas, disciplina) {
+// que tocaram essas turmas, filtrando por disciplina e/ou simulado quando informado), do pior
+// pro melhor % de acerto.
+function statsPorDescritorTurmas(turmas, disciplina, prova) {
   const turmaIds = new Set(turmas.map(t => t.id));
   let aplicacoes = db.aplicacoes.filter(ap => turmaIds.has(ap.turma));
-  if (disciplina) aplicacoes = aplicacoes.filter(ap => porId('provas', ap.prova)?.disciplina === disciplina);
+  if (prova) aplicacoes = aplicacoes.filter(ap => ap.prova === prova);
+  else if (disciplina) aplicacoes = aplicacoes.filter(ap => porId('provas', ap.prova)?.disciplina === disciplina);
   const aplicacaoIds = new Set(aplicacoes.map(ap => ap.id));
   const resultados = db.resultados.filter(r => aplicacaoIds.has(r.aplicacao));
   const m = new Map();
@@ -66,8 +71,8 @@ function statsPorDescritorTurmas(turmas, disciplina) {
     .sort((a, b) => a.s.taxa - b.s.taxa);
 }
 
-function painelDescritores(turmas, disciplina) {
-  const piores = statsPorDescritorTurmas(turmas, disciplina).slice(0, 5);
+function painelDescritores(turmas, disciplina, prova) {
+  const piores = statsPorDescritorTurmas(turmas, disciplina, prova).slice(0, 5);
   if (!piores.length) return '';
   return `<div class="bloco-ranking">
     <h3>Descritores que precisam de atenção</h3>
@@ -112,7 +117,15 @@ function dashboard() {
   if (dashboardDisciplina && !disciplinas.includes(dashboardDisciplina)) dashboardDisciplina = '';
 
   const turmasEscopo = dashboardTurma ? db.turmas.filter(t => t.id === dashboardTurma) : turmasDaEscola;
-  const s = statsGrupo(turmasEscopo, dashboardDisciplina);
+  const turmaIdsEscopo = new Set(turmasEscopo.map(t => t.id));
+  // Simulados (provas) de fato aplicados no escopo atual – ao longo do ano haverá vários por
+  // disciplina/série, então o painel deixa escolher um específico em vez de somar todos juntos.
+  let simulados = [...new Map(db.aplicacoes.filter(ap => turmaIdsEscopo.has(ap.turma)).map(ap => [ap.prova, porId('provas', ap.prova)])).values()].filter(Boolean);
+  if (dashboardDisciplina) simulados = simulados.filter(p => p.disciplina === dashboardDisciplina);
+  simulados.sort((a, b) => a.titulo.localeCompare(b.titulo));
+  if (dashboardProva && !simulados.some(p => p.id === dashboardProva)) dashboardProva = '';
+
+  const s = statsGrupo(turmasEscopo, dashboardDisciplina, dashboardProva);
   const statusPart = statusParticipacao(s.participacao), statusApr = statusAproveitamento(s.aproveitamento);
 
   const filtros = `
@@ -132,20 +145,25 @@ function dashboard() {
           <option value="">Todas as disciplinas</option>
           ${disciplinas.map(d => `<option value="${esc(d)}" ${d === dashboardDisciplina ? 'selected' : ''}>${esc(d)}</option>`).join('')}
         </select></div>
+      <div><label>Simulado</label>
+        <select onchange="setDashboardFiltro('prova', this.value)">
+          <option value="">Todos os simulados</option>
+          ${simulados.map(p => `<option value="${p.id}" ${p.id === dashboardProva ? 'selected' : ''}>${esc(p.titulo)}</option>`).join('')}
+        </select></div>
     </div>`;
 
   let ranking = '';
   if (!dashboardTurma) {
     if (admin && !escolaAtual) {
-      const grupos = escolas.map(e => ({ nome: e.nome, s: statsEscola(e.id, dashboardDisciplina) })).filter(g => g.s.aplicacoes);
+      const grupos = escolas.map(e => ({ nome: e.nome, s: statsEscola(e.id, dashboardDisciplina, dashboardProva) })).filter(g => g.s.aplicacoes);
       ranking = grupos.length ? listaRanking('Desempenho por escola', grupos) : '';
     } else {
-      const grupos = turmasDaEscola.map(t => ({ nome: nomeTurma(t), s: statsGrupo([t], dashboardDisciplina) })).filter(g => g.s.aplicacoes);
+      const grupos = turmasDaEscola.map(t => ({ nome: nomeTurma(t), s: statsGrupo([t], dashboardDisciplina, dashboardProva) })).filter(g => g.s.aplicacoes);
       ranking = grupos.length ? listaRanking('Desempenho por turma', grupos) : '';
     }
   }
-  const descritores = painelDescritores(turmasEscopo, dashboardDisciplina);
-  const provasNoFiltro = dashboardDisciplina ? db.provas.filter(p => p.disciplina === dashboardDisciplina).length : db.provas.length;
+  const descritores = painelDescritores(turmasEscopo, dashboardDisciplina, dashboardProva);
+  const provasNoFiltro = db.provas.filter(p => (!dashboardDisciplina || p.disciplina === dashboardDisciplina) && (!dashboardProva || p.id === dashboardProva)).length;
 
   document.getElementById('conteudo').innerHTML = `
     <div class="barra"><h2>Painel${!admin ? ' — ' + esc(porId('escolas', sessao.escola)?.nome ?? '') : ''}</h2></div>
@@ -173,6 +191,7 @@ function dashboard() {
 function setDashboardFiltro(campo, valor) {
   if (campo === 'escola') { dashboardEscola = valor; dashboardTurma = ''; }
   else if (campo === 'turma') dashboardTurma = valor;
-  else if (campo === 'disciplina') dashboardDisciplina = valor;
+  else if (campo === 'disciplina') { dashboardDisciplina = valor; dashboardProva = ''; }
+  else if (campo === 'prova') dashboardProva = valor;
   dashboard();
 }
