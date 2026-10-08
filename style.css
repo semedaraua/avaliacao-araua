@@ -57,9 +57,9 @@ body:not(.deslogado) #login { display:none; }
 .login-lado::after { width:300px; height:300px; left:-90px; bottom:-100px; }
 .login-lado > * { position:relative; z-index:1; }
 .login-lado .logo { width:auto; height:240px; max-width:100%; object-fit:contain; margin-bottom:28px; }
-.login-lado h1 { font-size:34px; line-height:1.2; margin:0 0 12px; font-weight:700; }
-.login-lado p { font-size:26px; margin:0; opacity:.92; }
-.login-lado .linha { width:56px; height:4px; background:#ffd84d; border-radius:2px; margin:20px 0; }
+.login-lado h1 { font-size:34px; line-height:1.2; margin:0 0 12px; font-weight:700; text-align:center; }
+.login-lado p { font-size:26px; margin:0; opacity:.92; text-align:center; }
+.login-lado .linha { width:56px; height:4px; background:#ffd84d; border-radius:2px; margin:20px auto; }
 .login-caixa { display:flex; align-items:center; justify-content:center; padding:32px; }
 .login-form { width:min(380px,100%); }
 .login-form h2 { margin:0 0 6px; font-size:26px; }
