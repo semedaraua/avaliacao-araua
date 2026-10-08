@@ -581,17 +581,43 @@ async function lerFolha(file, p, turma, ap) {
   if (Math.max(...areas) > 2.5 * Math.min(...areas)) throw new Error('Os marcadores dos cantos não foram reconhecidos direito. Tente outra foto, com a folha plana e bem iluminada.');
   const dst = cantos.map(c => [c.x, c.y]), proj = homografia(geo.marcas, dst);
   const escala = Math.hypot(dst[1][0] - dst[0][0], dst[1][1] - dst[0][1]) / Math.hypot(geo.marcas[1][0] - geo.marcas[0][0], geo.marcas[1][1] - geo.marcas[0][1]);
+  const pts = geo.bolhas.map(linha => linha.map(([x, y]) => proj(x, y)));
+
+  // Os 4 marcadores dos cantos calibram a perspectiva da folha inteira, mas papel
+  // levemente ondulado ou a distorção da lente do celular podem deslocar a grade de
+  // bolhas (no meio da folha) por alguns milímetros em relação ao que os 4 cantos
+  // preveem – mesmo a leitura batendo certinho nos próprios cantos. Por isso, antes
+  // de decidir cada resposta, procuramos o pequeno ajuste (dx,dy) que faz a grade
+  // "encaixar" melhor nos círculos realmente impressos: toda bolha, marcada ou não,
+  // tem um contorno impresso, então o deslocamento correto é o que captura mais
+  // tinta (contornos + marcações) ao todo. Busca em duas passadas (grossa e fina)
+  // numa amostra dos pontos, pra ficar rápido mesmo em provas com muitas questões.
+  const todos = pts.flat(), passo = Math.max(1, Math.ceil(todos.length / 60)), amostra = todos.filter((_, i) => i % passo === 0);
+  const raioExt = 2.6 * escala;
+  const pontuarOffset = (dx, dy) => amostra.reduce((s, [x, y]) => s + fracaoEscura(b, W, H, x + dx, y + dy, raioExt), 0);
+  const buscarOffset = (centroMm, alcanceMm, passoMm, atual) => {
+    let melhor = atual;
+    for (let dymm = centroMm[1] - alcanceMm; dymm <= centroMm[1] + alcanceMm; dymm += passoMm)
+      for (let dxmm = centroMm[0] - alcanceMm; dxmm <= centroMm[0] + alcanceMm; dxmm += passoMm) {
+        const dx = dxmm * escala, dy = dymm * escala, s = pontuarOffset(dx, dy);
+        if (s > melhor.s) melhor = { dx, dy, s };
+      }
+    return melhor;
+  };
+  let offset = buscarOffset([0, 0], 14, 1, { dx: 0, dy: 0, s: pontuarOffset(0, 0) });
+  offset = buscarOffset([offset.dx / escala, offset.dy / escala], 1.2, 0.2, offset);
+
   const raio = 2.3 * escala, cx = cv.getContext('2d');
   cx.lineWidth = Math.max(2, escala / 4);
-  const respostas = geo.bolhas.map(linha => {
-    const pts = linha.map(([x, y]) => proj(x, y));
+  const respostas = pts.map(linha => {
+    const ptsAj = linha.map(([x, y]) => [x + offset.dx, y + offset.dy]);
     // Marca forte (preenchimento bem escuro) OU marca clara mas nitidamente mais escura
     // que as demais bolhas da mesma questão – tolera luz irregular na foto, sombra e
     // caneta mais fraca, que antes faziam uma marca real ser lida como "em branco".
-    const fr = pts.map(([x, y]) => fracaoEscura(b, W, H, x, y, raio));
+    const fr = ptsAj.map(([x, y]) => fracaoEscura(b, W, H, x, y, raio));
     const base = Math.min(...fr);
     const marc = fr.map(v => v >= 0.45 || (v >= 0.25 && v - base >= 0.18));
-    pts.forEach(([x, y], j) => { cx.strokeStyle = marc[j] ? '#00a651' : 'rgba(255,0,0,.45)'; cx.beginPath(); cx.arc(x, y, raio, 0, 7); cx.stroke(); });
+    ptsAj.forEach(([x, y], j) => { cx.strokeStyle = marc[j] ? '#00a651' : 'rgba(255,0,0,.45)'; cx.beginPath(); cx.arc(x, y, raio, 0, 7); cx.stroke(); });
     const n = marc.filter(Boolean).length;
     return n === 1 ? LETRAS[marc.indexOf(true)] : n > 1 ? '*' : '';
   });
