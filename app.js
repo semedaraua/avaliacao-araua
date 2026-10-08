@@ -581,11 +581,16 @@ async function lerFolha(file, p, turma, ap) {
   if (Math.max(...areas) > 2.5 * Math.min(...areas)) throw new Error('Os marcadores dos cantos não foram reconhecidos direito. Tente outra foto, com a folha plana e bem iluminada.');
   const dst = cantos.map(c => [c.x, c.y]), proj = homografia(geo.marcas, dst);
   const escala = Math.hypot(dst[1][0] - dst[0][0], dst[1][1] - dst[0][1]) / Math.hypot(geo.marcas[1][0] - geo.marcas[0][0], geo.marcas[1][1] - geo.marcas[0][1]);
-  const raio = 2.0 * escala, cx = cv.getContext('2d');
+  const raio = 2.3 * escala, cx = cv.getContext('2d');
   cx.lineWidth = Math.max(2, escala / 4);
   const respostas = geo.bolhas.map(linha => {
     const pts = linha.map(([x, y]) => proj(x, y));
-    const marc = pts.map(([x, y]) => fracaoEscura(b, W, H, x, y, raio) >= 0.45);
+    // Marca forte (preenchimento bem escuro) OU marca clara mas nitidamente mais escura
+    // que as demais bolhas da mesma questão – tolera luz irregular na foto, sombra e
+    // caneta mais fraca, que antes faziam uma marca real ser lida como "em branco".
+    const fr = pts.map(([x, y]) => fracaoEscura(b, W, H, x, y, raio));
+    const base = Math.min(...fr);
+    const marc = fr.map(v => v >= 0.45 || (v >= 0.25 && v - base >= 0.18));
     pts.forEach(([x, y], j) => { cx.strokeStyle = marc[j] ? '#00a651' : 'rgba(255,0,0,.45)'; cx.beginPath(); cx.arc(x, y, raio, 0, 7); cx.stroke(); });
     const n = marc.filter(Boolean).length;
     return n === 1 ? LETRAS[marc.indexOf(true)] : n > 1 ? '*' : '';
