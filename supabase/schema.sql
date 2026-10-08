@@ -58,12 +58,18 @@ create table public.usuarios (
   )
 );
 
+-- "escolas" é criada antes de "usuarios" (usuarios.escola referencia
+-- escolas), então o vínculo de quem cadastrou cada escola só pode ser
+-- adicionado depois que "usuarios" já existe.
+alter table public.escolas add column criado_por uuid references public.usuarios(id) on delete set null;
+
 create table public.turmas (
   id uuid primary key default gen_random_uuid(),
   nome text not null,
   ano integer,
   turno text check (turno in ('Manhã','Tarde','Noite','Integral')),
   escola uuid not null references public.escolas(id) on delete cascade,
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -72,6 +78,7 @@ create table public.alunos (
   nome text not null,
   matricula text not null,
   turma uuid not null references public.turmas(id) on delete cascade,
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -84,6 +91,7 @@ create table public.matrizes (
   disciplina text not null check (disciplina in ('Língua Portuguesa','Matemática')),
   serie text not null check (serie in ('2º ano','3º ano','4º ano','5º ano','9º ano')),
   nome text not null,
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now(),
   unique (disciplina, serie)
 );
@@ -95,6 +103,7 @@ create table public.descritores (
   eixo text,
   codigo_bncc text,
   descricao text not null,
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now(),
   unique (matriz, codigo)
 );
@@ -111,6 +120,7 @@ create table public.provas (
   tipo text not null default 'Múltipla escolha – 5 opções (A a E)',
   gabarito jsonb not null default '[]'::jsonb,
   matriz uuid references public.matrizes(id),
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -122,6 +132,7 @@ create table public.aplicacoes (
   turma uuid not null references public.turmas(id) on delete cascade,
   data date,
   professor uuid references public.usuarios(id),
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -132,6 +143,7 @@ create table public.resultados (
   respostas jsonb not null default '[]'::jsonb,
   total integer not null default 0,
   acertos integer not null default 0,
+  criado_por uuid references public.usuarios(id) on delete set null,
   created_at timestamptz not null default now(),
   unique (aplicacao, aluno)
 );
@@ -160,6 +172,19 @@ create or replace function public.meu_usuario_id() returns uuid
 language sql security definer stable set search_path = public as $$
   select id from usuarios where auth_id = auth.uid()
 $$;
+
+-- Preenche sozinho quem cadastrou cada registro (usado pelas políticas de
+-- exclusão abaixo: só admin/semed ou quem criou o registro pode excluí-lo).
+-- Precisa vir depois de meu_usuario_id() existir, por isso não está inline
+-- nos "create table" acima.
+alter table public.escolas alter column criado_por set default public.meu_usuario_id();
+alter table public.turmas alter column criado_por set default public.meu_usuario_id();
+alter table public.alunos alter column criado_por set default public.meu_usuario_id();
+alter table public.matrizes alter column criado_por set default public.meu_usuario_id();
+alter table public.descritores alter column criado_por set default public.meu_usuario_id();
+alter table public.provas alter column criado_por set default public.meu_usuario_id();
+alter table public.aplicacoes alter column criado_por set default public.meu_usuario_id();
+alter table public.resultados alter column criado_por set default public.meu_usuario_id();
 
 create or replace function public.eh_global() returns boolean
 language sql security definer stable set search_path = public as $$
@@ -217,11 +242,14 @@ alter table public.solicitacoes enable row level security;
 create policy escolas_select on public.escolas for select to authenticated
   using (eh_gerente() or id = minha_escola());
 create policy escolas_insert on public.escolas for insert to authenticated
-  with check (eh_global());
+  with check (eh_global() and criado_por = meu_usuario_id());
 create policy escolas_update on public.escolas for update to authenticated
   using (eh_global());
+-- Exclusão: admin/semed excluem qualquer escola; mais ninguém cria escolas,
+-- então na prática só esses dois perfis chegam a excluir (regra idêntica às
+-- demais tabelas, por consistência).
 create policy escolas_delete on public.escolas for delete to authenticated
-  using (eh_global());
+  using (eh_global() or criado_por = meu_usuario_id());
 
 -- usuarios: GERENTES veem/editam/excluem, escopados à própria escola
 -- (exceto admin/semed, que veem todas). A CRIAÇÃO não tem política de insert:
@@ -243,8 +271,10 @@ create policy usuarios_update on public.usuarios for update to authenticated
     and (eh_global() or escola = minha_escola())
     and (auth_id <> auth.uid() or perfil = meu_perfil())
   );
+-- Exclusão: admin/semed excluem qualquer usuário; diretor/coordenador só
+-- excluem quem eles próprios cadastraram (nunca a si mesmos).
 create policy usuarios_delete on public.usuarios for delete to authenticated
-  using (eh_gerente() and (eh_global() or escola = minha_escola()) and auth_id <> auth.uid());
+  using ((eh_global() or criado_por = meu_usuario_id()) and auth_id <> auth.uid());
 
 -- Permite que qualquer usuário logado marque a própria troca de senha como
 -- concluída (1º acesso ou redefinição), sem depender de ser "gerente" —
@@ -255,61 +285,67 @@ language sql security definer set search_path = public as $$
 $$;
 grant execute on function public.concluir_troca_senha() to authenticated;
 
--- turmas: todos veem/criam/editam/excluem, escopados à própria escola.
+-- turmas: todos veem/criam/editam, escopados à própria escola. Exclusão:
+-- admin/semed excluem qualquer uma; os demais só a que eles próprios criaram.
 create policy turmas_select on public.turmas for select to authenticated
   using (eh_global() or escola = minha_escola());
 create policy turmas_insert on public.turmas for insert to authenticated
-  with check (eh_global() or escola = minha_escola());
+  with check ((eh_global() or escola = minha_escola()) and criado_por = meu_usuario_id());
 create policy turmas_update on public.turmas for update to authenticated
   using (eh_global() or escola = minha_escola());
 create policy turmas_delete on public.turmas for delete to authenticated
-  using (eh_global() or escola = minha_escola());
+  using (eh_global() or criado_por = meu_usuario_id());
 
 -- alunos: idem, via escola da turma.
 create policy alunos_select on public.alunos for select to authenticated
   using (eh_global() or escola_da_turma(turma) = minha_escola());
 create policy alunos_insert on public.alunos for insert to authenticated
-  with check (eh_global() or escola_da_turma(turma) = minha_escola());
+  with check ((eh_global() or escola_da_turma(turma) = minha_escola()) and criado_por = meu_usuario_id());
 create policy alunos_update on public.alunos for update to authenticated
   using (eh_global() or escola_da_turma(turma) = minha_escola());
 create policy alunos_delete on public.alunos for delete to authenticated
-  using (eh_global() or escola_da_turma(turma) = minha_escola());
+  using (eh_global() or criado_por = meu_usuario_id());
 
 -- matrizes/descritores: todos autenticados veem (precisam pra montar gabarito
 -- e ler os relatórios); só admin/semed criam/editam/excluem, igual ao banco de provas.
 create policy matrizes_select on public.matrizes for select to authenticated using (true);
-create policy matrizes_insert on public.matrizes for insert to authenticated with check (eh_global());
+create policy matrizes_insert on public.matrizes for insert to authenticated with check (eh_global() and criado_por = meu_usuario_id());
 create policy matrizes_update on public.matrizes for update to authenticated using (eh_global());
-create policy matrizes_delete on public.matrizes for delete to authenticated using (eh_global());
+create policy matrizes_delete on public.matrizes for delete to authenticated using (eh_global() or criado_por = meu_usuario_id());
 
 create policy descritores_select on public.descritores for select to authenticated using (true);
-create policy descritores_insert on public.descritores for insert to authenticated with check (eh_global());
+create policy descritores_insert on public.descritores for insert to authenticated with check (eh_global() and criado_por = meu_usuario_id());
 create policy descritores_update on public.descritores for update to authenticated using (eh_global());
-create policy descritores_delete on public.descritores for delete to authenticated using (eh_global());
+create policy descritores_delete on public.descritores for delete to authenticated using (eh_global() or criado_por = meu_usuario_id());
 
--- provas (banco): todos autenticados veem; só admin/semed criam/editam/excluem.
+-- provas (banco): todos autenticados veem; só admin/semed criam/editam.
+-- Exclusão: admin/semed excluem qualquer uma; demais só a que criaram
+-- (hoje só admin/semed criam provas, mas a regra fica igual às outras tabelas).
 create policy provas_select on public.provas for select to authenticated
   using (true);
 create policy provas_insert on public.provas for insert to authenticated
-  with check (eh_global());
+  with check (eh_global() and criado_por = meu_usuario_id());
 create policy provas_update on public.provas for update to authenticated
   using (eh_global());
 create policy provas_delete on public.provas for delete to authenticated
-  using (eh_global());
+  using (eh_global() or criado_por = meu_usuario_id());
 
--- aplicacoes: todos veem (escopado à escola); GERENTES criam/editam/excluem
--- (diretor/coordenador só na própria escola).
+-- aplicacoes: todos veem (escopado à escola); GERENTES criam/editam
+-- (diretor/coordenador só na própria escola). Exclusão: admin/semed excluem
+-- qualquer uma; diretor/coordenador só a que eles próprios criaram.
 create policy aplicacoes_select on public.aplicacoes for select to authenticated
   using (eh_global() or escola_da_turma(turma) = minha_escola());
 create policy aplicacoes_insert on public.aplicacoes for insert to authenticated
-  with check (eh_gerente() and (eh_global() or escola_da_turma(turma) = minha_escola()));
+  with check (eh_gerente() and (eh_global() or escola_da_turma(turma) = minha_escola()) and criado_por = meu_usuario_id());
 create policy aplicacoes_update on public.aplicacoes for update to authenticated
   using (eh_gerente() and (eh_global() or escola_da_turma(turma) = minha_escola()));
 create policy aplicacoes_delete on public.aplicacoes for delete to authenticated
-  using (eh_gerente() and (eh_global() or escola_da_turma(turma) = minha_escola()));
+  using (eh_global() or criado_por = meu_usuario_id());
 
 -- resultados: visível/edição escopada via aplicação -> turma -> escola;
 -- corrigir é permitido a admin/diretor/coordenador/professor (ESCOLARES em app.js).
+-- Exclusão: admin/semed excluem qualquer resultado; os demais só o que eles
+-- próprios corrigiram/lançaram.
 create policy resultados_select on public.resultados for select to authenticated
   using (eh_global() or exists (
     select 1 from public.aplicacoes ap where ap.id = aplicacao and escola_da_turma(ap.turma) = minha_escola()
@@ -317,7 +353,7 @@ create policy resultados_select on public.resultados for select to authenticated
 -- (insert/update também confirmam que o aluno é da mesma turma da aplicação,
 -- não só que a aplicação é da escola de quem está corrigindo.)
 create policy resultados_insert on public.resultados for insert to authenticated
-  with check (meu_perfil() in ('admin','semed','diretor','coordenador','professor') and exists (
+  with check (meu_perfil() in ('admin','semed','diretor','coordenador','professor') and criado_por = meu_usuario_id() and exists (
     select 1 from public.aplicacoes ap join public.alunos al on al.turma = ap.turma
     where ap.id = aplicacao and al.id = aluno and (eh_global() or escola_da_turma(ap.turma) = minha_escola())
   ));
@@ -327,9 +363,7 @@ create policy resultados_update on public.resultados for update to authenticated
     where ap.id = aplicacao and al.id = aluno and (eh_global() or escola_da_turma(ap.turma) = minha_escola())
   ));
 create policy resultados_delete on public.resultados for delete to authenticated
-  using (meu_perfil() in ('admin','semed','diretor','coordenador','professor') and (eh_global() or exists (
-    select 1 from public.aplicacoes ap where ap.id = aplicacao and escola_da_turma(ap.turma) = minha_escola()
-  )));
+  using (eh_global() or criado_por = meu_usuario_id());
 
 -- solicitacoes: GERENTES da escola veem/atendem; a criação (pedido de senha)
 -- acontece antes do login, então é feita por uma função à parte (ver abaixo).

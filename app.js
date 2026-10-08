@@ -178,6 +178,9 @@ const dependentes = {
 
 const eGlobal = () => GLOBAIS.includes(sessao?.perfil);
 const pode = (acao, col) => !!sessao && PERM[col][acao].includes(sessao.perfil);
+// Exclusão: admin/semed excluem qualquer registro; os demais só o que eles próprios cadastraram
+// (mesma regra aplicada de verdade pelo banco via RLS — isto aqui só evita um botão que falharia).
+const podeExcluirRegistro = reg => eGlobal() || reg.criado_por === sessao.id;
 const podeAcao = f => !!sessao && (ACOES[f] || []).includes(sessao.perfil);
 function perfisCriaveis() {
   return sessao?.perfil === 'admin' ? TODOS : sessao?.perfil === 'semed' ? ['diretor', 'coordenador', 'professor'] : ['professor'];
@@ -238,7 +241,7 @@ function listar() {
     <td class="acoes">
       ${(cfg.extras || []).filter(x => podeAcao(x.f)).map(x => `<button class="s ${x.p ? 'p' : ''}" onclick="${x.f}('${r.id}')">${x.r}</button>`).join('')}
       ${pode('editar', aba) ? `<button class="s" onclick="editar('${r.id}')">Editar</button>` : ''}
-      ${pode('excluir', aba) && !(aba === 'usuarios' && r.id === sessao.id) ? `<button class="s perigo" onclick="excluir('${r.id}')">Excluir</button>` : ''}</td></tr>`).join('');
+      ${pode('excluir', aba) && podeExcluirRegistro(r) && !(aba === 'usuarios' && r.id === sessao.id) ? `<button class="s perigo" onclick="excluir('${r.id}')">Excluir</button>` : ''}</td></tr>`).join('');
   const nPend = aba === 'usuarios' ? regs.filter(r => pendente(r.id)).length : 0;
   document.getElementById('conteudo').innerHTML = `
     <div class="barra"><h2>${tituloAba(aba)}</h2>${pode('criar', aba) ? `<button class="p" onclick="editar()">+ Novo(a) ${(aba === 'usuarios' && !eGlobal() ? 'professor' : cfg.singular).toLowerCase()}</button>` : ''}</div>
@@ -311,7 +314,7 @@ function editar(id) {
 
 async function excluir(id) {
   const reg = porId(aba, id);
-  if (!reg || !pode('excluir', aba) || !visiveis(aba).includes(reg)) return;
+  if (!reg || !pode('excluir', aba) || !visiveis(aba).includes(reg) || !podeExcluirRegistro(reg)) return;
   if (aba === 'usuarios' && id === sessao.id) return alert('Você não pode excluir o seu próprio usuário.');
   const usados = (dependentes[aba] || []).reduce((n, [col, campo]) => n + db[col].filter(x => x[campo] === id).length, 0);
   if (usados) return alert(`Não é possível excluir: há ${usados} registro(s) vinculado(s) a este item.`);
