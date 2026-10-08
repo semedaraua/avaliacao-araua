@@ -27,24 +27,7 @@ async function iniciar() {
 }
 
 /* ---------- Tela de login ---------- */
-const LOGO = `<svg class="logo" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-  <rect width="72" height="72" rx="18" fill="rgba(255,255,255,.18)"/>
-  <rect x="14" y="16" width="34" height="44" rx="5" fill="#fff"/>
-  <rect x="24" y="10" width="14" height="8" rx="3" fill="#fff" stroke="#e6dccf" stroke-width="1.5"/>
-  <circle cx="22" cy="24" r="3.4" fill="#e8590c"/><rect x="29" y="22" width="14" height="4" rx="2" fill="#f5d9c2"/>
-  <circle cx="22" cy="35" r="3.4" fill="#e8590c"/><rect x="29" y="33" width="14" height="4" rx="2" fill="#f5d9c2"/>
-  <circle cx="22" cy="46" r="3.4" fill="none" stroke="#e8590c" stroke-width="1.6"/><rect x="29" y="44" width="14" height="4" rx="2" fill="#f5d9c2"/>
-  <rect x="50" y="5" width="6" height="3" rx="1.3" fill="#fff"/>
-  <circle cx="53" cy="6.5" r="1.4" fill="#fff"/>
-  <circle cx="56" cy="21" r="11" fill="#fff" stroke="#e8590c" stroke-width="2"/>
-  <line x1="56" y1="21" x2="56" y2="14" stroke="#f59f00" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="56" cy="21" r="1.6" fill="#e8590c"/>
-  <g transform="rotate(45 47 55)">
-    <rect x="43" y="45" width="8" height="22" rx="2" fill="#f59f00"/>
-    <rect x="43" y="45" width="8" height="6" rx="2" fill="#fff"/>
-    <path d="M43 67l4 6 4-6z" fill="#7a5230"/>
-  </g>
-</svg>`;
+const LOGO = `<img class="logo" src="brasao.png" alt="Brasão da Secretaria Municipal de Educação de Arauá">`;
 
 let falhas = 0, bloqueadoAte = 0;
 
